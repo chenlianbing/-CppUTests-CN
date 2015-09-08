@@ -189,7 +189,70 @@ TEST(BarTestGroup, Bar)
 - 执行测试用例Foo
 - teardown FooTestGroup
 
+
 ### 命令行开关
-- -v 详细信息,在测试用例执行的时候打印它的名字
-- -c 色彩化输出，执行成功是打印结果以绿色显示，失败以红色显示
+- -v verbose,在测试用例执行的时候打印它的名字
+- -c colorize output，执行成功是打印结果以绿色显示，失败以红色显示
 - -r# 重复执行#次，不指定次数默认执行2次。这项功能在调式内存泄露的情况下有用，如果第二次执行没有泄露，也就表明在第一次有人分配了static内存空间并且没有释放它们。
+- -g group，仅仅运行测试集名称当中包含有指定字串的那部分测试集
+- -sg 仅仅运行指定名称的测试集
+- -n 运行测试用例名称当中包含有指定字串的测试用例
+- -sn 仅仅运行指定名称的测试用例
+- "TEST(group, name)"运行测试集group当中的name测试用例
+- -ojunit 输出为JUnit ant插件风格的xml文件（一般用于CI系统之中）
+- -k 包名称，子JUnit输出当中添加一个包名称（一般用于CI系统当中的分类）
+
+你可以同时指定多个 `-s|sg`，`-s|sn`以及"TEST(group, name)"参数：
+
+当通过`-s|sg`参数指定测试集，实际上会运行这些测试集中的所有用例，因为没有特定的测试用例名称与之匹配。
+
+当通过`-s|sg`参数指定测试用例时，实际上会运行这些当前所有测试集中名字匹配的所有测试用例，因为并没有特定的特定的测试集合。
+
+当通过`-s|sg`，`-s|sn`（或者使用“TEST(group, name)”共同给出参数时仅仅会运行相匹配的那些测试集或者测试用例。
+
+### 内存泄露检测
+
+CppUTest支持测试用例层面的内存泄露检测，也即是说该框架会检测一个用例在运行前后的内存状态是否相同。
+
+大致上来说，其中的检测过程类似：1. 用例setup前处理->记录使用的内存总数 2. setup 3. 执行测试用例 4. teardown 5. 用例teardown后处理->检查当前的内存总数是否与之前的相等。
+
+内存泄露检测器包括了三部分：* 检测器基础部件（包括new操作符的链接符号）*重载了new操作符的宏（包含额外的文件和行号信息）*重载了的malloc/free的宏，用来兼容C。
+
+为了支持如上提到的宏，你需要在Makefile当中添加如下编译选项（这些选项在你使用CppUTest Makefile helpers时会自动添加）：
+
+```
+CXXFLAGS += -include $(CPPUTEST_HOME)/include/CppUTest/MemoryLeakDetectorNewMacros.h
+CFLAGS += -include $(CPPUTEST_HOME)/include/CppUTest/MemoryLeakDetectorMallocMacros.h
+```
+
+##### 关闭与打开内存泄露检测
+
+有多种方式去关闭内存泄露检测。然而，将内存泄露检测功能打开并且依据它提供的信息去修复对应的内存泄露问题，保证代码质量的可靠是备受推崇的做法。
+
+你可以添加如下代码将内存泄露检测完全关闭：
+
+```
+int main(int argc, char** argv)
+{
+    MemoryLeakWarningPlugin::turnOffNewDeleteOverloads();
+    return CommandLineTestRunner::RunAllTests(argc, argv);
+}
+```
+
+你也可以仅仅像如下这样关闭某一个测试用例的内存检测：
+
+```
+void setup()
+{
+    MemoryLeakWarningPlugin::turnOffNewDeleteOverloads();
+}
+
+void teardown()
+{
+    MemoryLeakWarningPlugin::turnOnNewDeleteOverloads();
+}
+```
+
+如果想彻底使能内存泄露检测，你也可以在构建CppUTest的时候指定"configure-disable-memory-leak-detection"或者在编译的时候将参数“-DCPPUTEST_MEM_LEAK_DETECTION_DISABLED”传递给编译器。
+
+##### 与STL中的new操作符宏的冲突
