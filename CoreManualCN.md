@@ -1,4 +1,4 @@
-ppUTest是一个基于C/C++的单元测试框架，它可以被用来进行单元测试或者测试驱动你的代码。该框架使用C++编写，但可以同时运用在C和C++项目当中，尤其在嵌入式系统当中运用得更为广泛。
+CppUTest是一个基于C/C++的单元测试框架，它可以被用来进行单元测试或者测试驱动你的代码。该框架使用C++编写，但可以同时运用在C和C++项目当中，尤其在嵌入式系统当中运用得更为广泛。
 
 CppUTest核心设计原则：
 
@@ -256,3 +256,135 @@ void teardown()
 如果想彻底使能内存泄露检测，你也可以在构建CppUTest的时候指定"configure-disable-memory-leak-detection"或者在编译的时候将参数“-DCPPUTEST_MEM_LEAK_DETECTION_DISABLED”传递给编译器。
 
 ##### 与STL中的new操作符宏的冲突
+由于在内存检测相关宏重载了new操作符，重载过后的new操作符包含了FILE和LINE参数。因此，如果你也恰好重载了new操作符，便会发生“overloaded definition”的编译错误，这在你使用STL的时候最为常见。
+
+###### 解决与STL的冲突
+最简单的方式是不要向编译器传递`-include MemoryLeakDetectionNewMacros.h`，不过这会导致你的编译文件当中缺少文件和行号的信息，所以这种方式不作推荐。另外一种方式是创建一个NewMacros.h文件，并在new的宏定义之前将STL文件包含进来。例如，下面的NewMacros文件是一个使用std::list的程序的例子：
+
+```
+#include "list"
+#include "CppUTest/MemoryLeakDetectorNewMacros.h"
+```
+
+此时，你还需要给编译器传递`-include MyOwnNewMacros.h`。如上这样处理会保证new操作符在其定义之前重载了，也因此解决了所有冲突。
+
+##### 与自定义重载的冲突
+这种情况极少出现。你可以通过处理STL冲突那样来处理它，但最好做一些细致控制。另外，你可以通过“临时去使能new宏，重载new操作符，再次使能new宏”来完成，见如下代码：
+
+```
+class NewDummyClass
+{
+public:
+#if CPPUTEST_USE_NEW_MACROS
+   #undef new
+#endif
+   void* operator new (size_t size, int additional)
+#if CPPUTEST_USE_NEW_MACROS
+   #include "CppUTest/MemoryLeakDetectorNewMacros.h"
+#endif
+   {
+      // Do your thing!
+   }
+};
+```
+没错，这样干看起来确实丑陋不堪。但通常来说可亲的程序员们并不会到处重载new操作符，如果你一定要那样做，可以考虑将new宏完全关闭。
+
+##### 与MFC的冲突
+待添加。
+
+### 测试插件
+使用测试插件可以在没一个测试用例的开始和结束阶段添加处理操作。例如：
+- 内存泄露检测器（默认提供）
+- 指针还原机制（默认提供），在一个指针在测试执行过程当中被改写，但它必须在测试之后还原的时候该功能就显得特别有用了，尤其在测试需要改写一个指向函数的指针的时候。
+- 释放所有的互斥量，你可以编写一个用来检测互斥量或者其他共享资源是否在测试用例退出时释放的插件。
+
+如下是一个SetPointerPlugin main函数示例：
+
+```
+int main(int ac, char** av)
+{
+    TestRegistry* r = TestRegistry::getCurrentRegistry();
+    SetPointerPlugin ps("PointerStore");
+    r->installPlugin(&ps);
+    return CommandLineTestRunner::RunAllTests(ac, av);
+}
+
+TEST_GROUP(HelloWorld)
+{
+   static int output_method(const char* output, ...)
+   {
+      va_list arguments;
+      va_start(arguments, output);
+      cpputest_snprintf(buffer, BUFFER_SIZE, output, arguments);
+      va_end(arguments);
+      return 1;
+   }
+   void setup()
+   {
+      //overwrite the production function pointer witha an output method that captures
+      //output in a buffer.
+      UT_PTR_SET(helloWorldApiInstance.printHelloWorld_output, &output_method);
+   }
+   void teardown()
+   {
+   }
+};
+
+TEST(HelloWorld, PrintOk)
+{
+   printHelloWorld();
+   STRCMP_EQUAL("Hello World!\n", buffer)
+}
+
+//Hello.h
+#ifndef HELLO_H_
+#define HELLO_H_
+
+extern void printHelloWorld();
+
+struct helloWorldApi {
+   int (*printHelloWorld_output) (const char*, ...);
+};
+
+#endif /*HELLO_H_*/
+
+//Hello.c
+
+#include <stdio.h>
+#include "hello.h"
+
+//in production, print with printf.
+struct helloWorldApi helloWorldApiInstance = {
+   &printf
+};
+
+void printHelloWorld()
+{
+   helloWorldApiInstance.printHelloWorld_output("Hello World!\n");
+}
+```
+<font style="color:red">Q: 小例子，复习下va_argument用法，提出为小code snippet.</font>
+
+### 脚本
+在CppUTest发布`scripts/README.TXT`目录存放了一些用来创建initial头文件、源文件以及测试文件的脚本，它们可以节省非常多的打字时间。
+
+### 高级
+
+##### 为支持·==·操作符的类型自定义CHECK_EQUAL
+创建如下函数：
+
+```
+SimpleString StringFrom (const yourType&)
+```
+
+扩展目录存放有少量类似代码。
+
+##### 使用TestPlugin构建默认的check机制
+- CppUTest通过安装测试插件来支持其他的检测功能。
+- 测试插件一般从TestPlugin类当中派生出来，之后通过installPlugin方法安装到TestRegistry当中。
+- 所有的测试插件均会在单个测试用例与所有测试用例执行前后被调用（比如Setup和Teardown）。测试插件一般在main当中进行安装。
+- 测试插件可以被用来保证系统稳定性，以及诸如文件、内存或者网络连接资源的操作。
+- 在CppUTest当中，内存泄露检测器是通过默认使能的测试插件来完成的。
+
+##### 如何运行链接到库当中的测试用例
+
