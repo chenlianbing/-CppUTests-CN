@@ -387,4 +387,188 @@ SimpleString StringFrom (const yourType&)
 - 在CppUTest当中，内存泄露检测器是通过默认使能的测试插件来完成的。
 
 ##### 如何运行链接到库当中的测试用例
+在一些大的项目中，可以将所有的测试用例链接在一起或者将其连接到一个测试库并集成到某个组件当中，以此来完成一次性执行完所有的单元测试。然而，如果将所有的测试用例编译成一个库，可能会因为在其他组件当中没有任何地方引用库中的接口而导致该库并不会被链接，这样一来实际上无法运行其中的任何测试了。好在，这里有几个变通方案可以解决这个问题：
 
+- 在main.cpp或者main.h当中使用IMPORT_TEST_GROUP宏来创建一个针对测试用例的引用。该种方案需要在每一个TEST_GROUP当中进行布置（同时需要注意：这些测试集不能分布在多个文件当中）
+- 使用连接器选项来保证连接整个库（仅支持在linux，MacOSX当前不支持）。只需要将需要链接的库放在“-WL, -whole-archive”和“-Wl,-no-whole-archive”中间，例如：
+
+```
+gcc -o test_executable production_library.a -Wl,-whole-archive test_library.a -Wl,-no-whole-archive $(OTHER_LIBRARIES)
+```
+
+### C接口
+
+有时，一个C头文件并不会使用C++编译器进行编译。一些宏可以用来指定.c源文件当中测试用例而不用调用C++。除此之外，一些宏包装器可以用来将这些测试用例集中到一个.cpp的源文件中来兼容CppUTest框架。你可以在TestHarness_c.h当中查找到所有C宏的定义。
+
+下面是一个小例子。
+
+PureCTests.h是需要测试的函数对应的头文件：
+
+```
+/** Legal C code that would not compile under C++ */
+int private (int new);
+```
+
+PureCTests.c是对应的测试文件：
+
+```
+#include "PureCTests_c.h" /** the offending C header */
+#include "CppUTest/TestHarness_c.h"
+#include "CppUtestExt/MockSupport_c.h"
+
+/** Mock for function internal() */
+int internal(int new)
+{
+    mock_c()->actualCall("internal")
+            ->withIntParameters("new", new);
+    return mock_c()->returnValue().value.intValue;
+}
+
+/** Implementation of function to test */
+int private (int new)
+{
+    return internal(new);
+}
+
+/** Setup and Teardown per test group (optional) */
+TEST_GROUP_C_SETUP(mygroup)
+{
+}
+TEST_GROUP_C_TEARDOWN(mygroup)
+{
+    mock_c()->checkExpectations();
+    mock_c()->clear();
+}
+
+/** The actual tests for this test group */
+TEST_C(mygroup, test_success)
+{
+    mock_c()->expectOneCall("internal")->withIntParameters("new", 5)->andReturnIntValue(5);
+    int actual = private(5);
+    CHECK_EQUAL_C_INT(5, actual);
+}
+TEST_C(mygroup, test_mockfailure)
+{
+    mock_c()->expectOneCall("internal")->withIntParameters("new", 2)->andReturnIntValue(5);
+    int actual = private(5);
+    CHECK_EQUAL_C_INT(5, actual);
+}
+TEST_C(mygroup, test_equalfailure)
+{
+    mock_c()->expectOneCall("internal")->withIntParameters("new", 5)->andReturnIntValue(2);
+    int actual = private(5);
+    CHECK_EQUAL_C_INT(5, actual);
+}
+```
+
+而PureCTests.cpp是为了使用CppUTest框架专门生成的包装文件：
+
+```
+#include "CppUTest/CommandLineTestRunner.h"
+#include "CppUTest/TestHarness_c.h"
+
+/** For each C test group */
+TEST_GROUP_C_WRAPPER(mygroup)
+{
+    TEST_GROUP_C_SETUP_WRAPPER(mygroup); /** optional */
+    TEST_GROUP_C_TEARDOWN_WRAPPER(mygroup); /** optional */
+};
+
+/** For each C test */
+TEST_C_WRAPPER(mygroup, test_success);
+TEST_C_WRAPPER(mygroup, test_mockfailure);
+TEST_C_WRAPPER(mygroup, test_equalfailure);
+
+/** Test main as usual */
+int main(int ac, char** av)
+{
+    return RUN_ALL_TESTS(ac, av);
+}
+```
+
+上面代码当中的TEST_GROUP_C_SETUP() / TEST_GROUP_C_TEARDOWN(), TEST_GROUP_C_SETUP_WRAPPER() / TEST_GROUP_C_TEARDOWN_WRAPPER()在你不需要的时候可以不要。
+
+### 使用Google Mock
+
+在CppUTest当中直接使用Google Mock只需要在编译的时候将其编译进来：
+
+```
+$ GMOCK_HOME = /location/of/gmock
+$ configure --enable-gmock
+$ make
+$ make install
+```
+
+之后在测试文件当中，还需要将"CppUTestExt/GMock.h"包含进来。别忘了将“-DCPPUTEST_USE_REAL_GMOCK”传递给编译器，以及链接CppUTestExt库。
+
+```
+class MyMock : public ProductionInterface
+{
+public:
+    MOCK_METHOD0(methodName, int());
+};
+
+TEST(TestUsingGMock, UsingMyMock)
+{
+    NiceMock<MyMock> mock;
+    EXPECT_CALL(mock, methodName()).Times(2).WillRepeatedly(Return(1));
+
+    productionCodeUsing(mock);
+}
+```
+
+由于gtest会在第一次执行是分配静态数据，所以会被内存泄露检测器误以为发生了内存泄露，尽管它并不是真的内存泄露。这里有两个方法来规避这种情况：其一，使用在【内存泄露检测】一节提到的关闭内存泄露检测；其二，使用GTestConvertor。
+
+使用GTestConvertor只需要在main函数当中填写如下代码：
+
+```
+#include "CppUTestExt/GTestConvertor.h"
+
+int main(int argc, char** argv)
+{
+    GTestConvertor convertor;
+    return CommandLineTestRunner::RunAllTests(argc, argv);
+}
+```
+
+添加的最重要的一行代码是GTestConvertor的哪一样，同时确保已经定义了CPPUTEST_USE_REAL_GTEST（添加-DCPPUTEST_USE_REAL_GTEST的编译器选项）。
+
+### 在CppUTest当中运行Google Tests
+人们在对待单元测试工具时有着不同的看法。显然地，在测试驱动时，我们觉得CppUTest比其他的工具表现得更好。然而，仍旧有不少人使用GoogleTest（它其实也并不比CppUnit差。）因此，我们做了一些集成工作来将google测试用例和CppUTest测试用例链接在同一个二进制文件当中（连同CppUTest用例执行器），这样做有一些额外的好处：
+
+- google 测试用例也可以进行内存泄露检测
+- gtest冗余的输出信息一去不复返了
+- 可以同时在项目当中使用CppUMock和GMock
+
+要完成该工作非常简单。首先，你需要在编译CppUtest将对GTest的支持打开（为了预防对GTest的依赖默认情况下它是关闭的）。
+
+```
+$ GMOCK_HOME = /location/of/gmock
+$ configure --enable-gmock
+$ make
+$ make install
+```
+
+如果你不想使用GMock，而仅仅使用GTest你可以修改如上代码：
+
+```
+$ GMOCK_HOME = /location/of/gtest
+$ configure --enable-real-gtest
+$ make
+$ make install
+```
+
+另外，你还需要在main函数当中添加如下的代码：
+
+```
+#include "./include/CppUTestExt/GTestConvertor.h"
+
+int main(int argc, char** argv)
+{
+    GTestConvertor convertor;
+    convertor.addAllGTestToTestRegistry();
+    return CommandLineTestRunner::RunAllTests(argc, argv);
+}
+```
+
+（当然，你得确保在链接时已经将gtest添加到包含路径当中了。）
