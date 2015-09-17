@@ -22,6 +22,34 @@ CppUTest支持与mock一起构建。这篇文档介绍CppUTest对于mock的支�
 - [C接口]()
 
 ### 一个简单场景
+一个最简单的场景是检查一个预期的函数是否被调用，如下：
+
+```
+#include "CppUTest/TestHarness.h"
+#include "CppUTestExt/MockSupport.h"
+
+TEST_GROUP(MockDocumentation)
+{
+    void teardown()
+    {
+        mock().clear();
+    }
+};
+
+void productionCode()
+{
+    mock().actualCall("productionCode");
+}
+
+TEST(MockDocumentation, SimpleScenario)
+{
+    mock().expectOneCall("productionCode");
+    productionCode();
+    mock().checkExpectations();
+}
+
+```
+
 
 
 
