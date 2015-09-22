@@ -198,8 +198,73 @@ public:
 };
 ```
 
-其中的isEqual用来比较两个参数。而valueToString会在用例执行失败的时候用来打印错误信息。
+其中的isEqual用来比较两个参数。而valueToString会在用例执行失败的时候用来打印错误信息，也就是搞定如何输出它期望的值与实际的值。如果你更情愿使用C函数，只需要使用接受构造器中函数指针的MockFunctionComparator。
+<i style="color:red">怎么理解这句话，源代码中是怎样的呢？是否在框架里面定义了对应的比较器的指针，只需要将比较器作为参数传递进入就好了？</i>
 
+在需要删除比较器的时候，仅仅需要添加如下一行代码即可：
+
+```
+mock().removeAllComparators();
+```
+
+比较器有时会让人摸不着头脑，这里有一些使用提示：
+
+- <i>提示一：注意比较器变量的作用域！</i>
+比较器在传递参数的时候并不会进行值拷贝，而是直接使用从installComparator函数中传递进来的实例。因此，在使用的时候务必确保实例的有效性。比如，如果你在TEST当中调用了installComparator，却在teardown的时候进行checkExpectations，此时比较器已经销毁了，所以这个时候就会使得测试程序崩溃了。
+
+- <i>提示二：在使用MockPlugin的时候也别忽视其作用域</i>
+在使用MockPlugin时（推荐），一种可取的方式是通过MockPlugin来安装比较器，或者将比较器置于全局空间下。checkExpectation会在teardown之后调用，如果比较器在之前销毁也将造成崩溃。
+
+### 出参
+对于某些参数，它们传递给调用函数时不是直接传递参数对应的值，而是传递引用，如此便可通过修改它所指向的数据来达到“返回值”的效果。
+
+CppUMock支持在expected call时指定这些输出参数：
+
+```
+int outputValue = 4;
+mock().expectOneCall("Foo").withOutputParameterReturning("bar", &outputValue, sizeof(outputValue));
+```
+
+同时，在actual call当中需要有下面这样对应的代码：
+
+```
+void Foo(int *bar)
+{
+    mock().actualCall("foo").withOutputParameter("bar", bar);
+}
+```
+
+一旦在调用了actual call之后之后，传递给Foo函数的参数bar的值将会与expected call当中指定的值一致（在这个例子当中bar的值将为4）。
+
+- <i>提示一：</i>
+在使用输出参数的时候，CppUMock对于非法访问内存是束手无策的，它会对在withOutputParameterReturning调用中指定大小的内存执行memcpy操作。因此，如果它拷贝的内存大小超过了actual call中出参指向的数据空间大小，这个时候便极有可能会出现段错误了。
+
+针对withOutputParameterReturning提供了针对char, int, unsigned, long, unsigned long和double类型的支持，这样就可以省略掉size这个参数。（译注：这也在一定程度上避免了不小心指定不合理的空间大小而导致段错误的问题）
+
+```
+char charOutputValue = 'a';
+mock().expectOneCall("Foo").withOutputParameterReturning("bar", &charOutputValue);
+
+int intOutputValue = 4;
+mock().expectOneCall("Foo").withOutputParameterReturning("bar", &intOutputValue);
+
+unsigned unsignedOutputValue = 4;
+mock().expectOneCall("Foo").withOutputParameterReturning("bar", &unsignedOutputValue);
+
+long longOutputValue = 4;
+mock().expectOneCall("Foo").withOutputParameterReturning("bar", &longOutputValue);
+
+unsigned long unsignedLongOutputValue = 4;
+mock().expectOneCall("Foo").withOutputParameterReturning("bar", &unsignedLongOutputValue);
+
+double doubleOutputValue = 4;
+mock().expectOneCall("Foo").withOutputParameterReturning("bar", &doubleOutputValue);
+```
+
+- <i>提示二：</i>
+当有char, int等等数组传递给withOutputParameter的时候，你必须在withOutputParameterReturning的时候指定该数组的确切空间，否则它只会拷贝一个元素。
+
+### 返回值
 
 
 
