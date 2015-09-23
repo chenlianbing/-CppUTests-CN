@@ -265,6 +265,60 @@ mock().expectOneCall("Foo").withOutputParameterReturning("bar", &doubleOutputVal
 当有char, int等等数组传递给withOutputParameter的时候，你必须在withOutputParameterReturning的时候指定该数组的确切空间，否则它只会拷贝一个元素。
 
 ### 返回值
+有时需要让一个被mock的函数返回特定的值以便更全的测试到产品代码中的流程。此时测试代码需要如此写：
+
+```
+mock().expectOneCall("function").andReturnValue(10);
+```
+
+同时被mock的函数需要做如下更新：
+
+```
+int function () {
+    return mock().actualCall("function").returnIntValue();
+}
+```
+
+我们也可以像下面这样将returnIntValue和actualCall分开：
+
+```
+int function () {
+    mock().actualCall("function");
+    return mock().intReturnValue();
+}
+```
+
+CppUMock框架支持的返回值选项用来在测试用例与被mock的对象之间传递数据，它们本身不存在使得测试用例失败的情况。
+
+### 传递其他数据
+当需要给一个mock对象传递更多数据的时候，比如在某次计算当中仅仅需要改变一对参数的值，可以做如下处理：
+
+```
+ClassFromProductionCode object;
+mock().setData("importantValue", 10);
+mock().setDataObject("importantObject", "ClassFromProductionCode", &object);
+```
+
+在mock对象当中做对应的修改：
+
+```
+ClassFromProductionCode * pobject;
+int value = mock().getData("importantValue").getIntValue();
+pobject = (ClassFromProductionCode*) mock().getData("importantObject").getObjectPointer();
+```
+
+与返回值一样，如上这样设置特定的值或者对象并不会导致用例失败，相反却可以给构建mock对象时提供诸多支持。
+
+### 其他MockSupport - ignoring, enabling, clearing, crashing
+MockSupport额外提供了不少有用的函数，这一节将一一介绍。
+
+最为常见的，你仅仅需要检测当前测试用例当中的一些调用而不用理会除此之外的其他函数的调用情况。毕竟，如果你为每一个调用都添加一条expectOneCall语句，你的测试用例将非常庞大（事实上让人忧虑的是测试用例过大而导致的代码坏味道）。此时，一种方式便是使用ignoreOtherCalls：
+
+```
+mock().expectOneCall("foo");
+mock().ignoreOtherCalls();
+```
+
 
 
 
