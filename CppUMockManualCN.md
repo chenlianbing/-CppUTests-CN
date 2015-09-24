@@ -320,6 +320,38 @@ mock().ignoreOtherCalls();
 ```
 
 
+这样做就会使得在执行调用检查的时候仅仅检测函数foo是否得以调用，而其他函数调用的检测将被忽略（比如函数bar）。
+
+有时，你想暂时性的去使能mock框架以便有时间干点其他事情，而不是在整个测试用例执行过程中忽略掉其他调用。这种情况一般发生在初始化阶段，这个时候你可以使用mock的使能/去使能功能：
+
+```
+mock().disable();
+doSomethingThatWouldOtherwiseBlowUpTheMockingFramework();
+mock().enable();
+```
+
+在你忽略有返回值的mock函数的调用时，这在测试时可能会引起运行时错误。
+
+这很容易解释，比如你mock了如下的函数：
+
+```
+int function () {
+    return mock().actualCall("function").returnIntValue();
+}
+```
+
+如果你试着去忽略它或者去使能mock框架，问题便随之而来。为什么呢？因为此时返回值是未定义的，也就是说这里没有办法去定义被mock函数的返回值。
+
+对于这种情况有不少可以指定默认返回值的函数可供使用，尤其对于这种mock函数被忽略的情况，例如上面的例子可以修改为：
+
+```
+int function () {
+    return mock().actualCall("function").returnIntValueOrDefault(5);
+}
+```
+
+在函数被忽略了或者框架被去使能，会返回5的默认值。反之，则返回值为测试用例当中expect指定的值。
+
 
 
 
