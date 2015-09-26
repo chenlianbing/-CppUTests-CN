@@ -352,6 +352,109 @@ int function () {
 
 在函数被忽略了或者框架被去使能，会返回5的默认值。反之，则返回值为测试用例当中expect指定的值。
 
+除了上面这种方法之外，还可以在mock时直接指定返回值（不需要使用调用actualCall返回的对象）。
+
+```
+int function () {
+    mock().actualCall("function");
+    return mock().returnIntValueOrDefault(5);
+}
+```
+
+在你需要清除所有的expectations, settings,以及comparators，调用如下clear接口即可：
+
+```
+mock().clear();
+```
+
+该清楚调用并不会对expectations做任何检测工作，它仅仅会擦除之前的所有mock设置并且重置它们。一般来说clear会在检测了expectations之后被调用。
+
+在一个actual调用产生时你并不会知道它是在什么地方被调用，除了你有拥有该次调用的调用栈。但实际上，mock框架并不支持这样的操作。这里唯一可以使用的是调用crashOnFailure，这样就可以使用调试器去查看对应的调用信息了：
+
+```
+mock().crashOnFailure();
+```
+
+如果你使用gdb，可以如此做：
+```
+gdb examples/CppUTestExamples_tests
+r
+bt
+```
+
+（r是run的意思，它会执行测试用例且在其崩溃时推出。bt指的是back trace，它便会打印出调用栈信息了。）
+
+### MockSupport作用域
+MockSupport作用域这一特性使得分层使用MockSupport成为可能，这可能看起来很复杂，而实际上并不是那样。在mock函数时，你可以传递命名空间或者作用域并在其中做一些比如记录expectations等事情，例如：
+
+```
+mock("xmlparser").expectOneCall("open");
+```
+
+相应地，actual调用必须对应起来：
+
+```
+mock("xmlparser").actualCall("open");
+```
+
+这样指定了作用域之后，就不会受到其他的作用域的影响了。比如下面的actualCall调用就不会匹配到xmlparser当中的open调用：
+
+```
+mock("").actualCall("open");
+```
+
+在不同的命名空间当中进行mock调用使得ignore某种类型的调用变得容易，同时也就可以更好的打理当前需要关注的mock逻辑了，例如：
+
+```
+mock("xmlparser").expectOneCall("open");
+mock("filesystem").ignoreOtherCalls();
+```
+
+### MockPlugin
+CppUTest插件用来增添更多“扩展”功能，它们一般被配置在main函数当中，在那里可以使得对应的功能被应用到所有的单元测试例中。MockPlugin便是一款使得mock更易使用的插件，它包括如下功能：
+
+- 在每一个测试用例的最后进行checkExpectations的工作（如果布置在全局作用域，它会递归的遍历所有的作用域）
+- 在每一个测试用例执行完之后清除所有的expectations
+- 在每个测试用例的开头安装配置在插件当中的所有比较器
+- 在每个测试用例执行完之后移除所有的比较器
+
+安装MockPlugin你得在main函数当中添加类似如下代码：
+
+```
+#include "CppUTest/TestRegistry.h"
+#include "CppUTestExt/MockSupportPlugin.h"
+
+MyDummyComparator dummyComparator;
+MockSupportPlugin mockPlugin;
+
+mockPlugin.installComparator("MyDummyType", dummyComparator);
+TestRegistry::getCurrentRegistry()->installPlugin(&mockPlugin);
+```
+
+如上为MyDummy创建了一个比较器并将其安装在mockPlugin插件当中，这样就使得该比较器对所有的测试用例可见。之后创建了mockPlugin插件并且注册到当前的测试注册表。一旦完成了这些工作，在checkExpectations以及清除MockSupport这些琐碎的事情上就省心了。
+
+### C接口
+通常来说mock框架是基于C++之上，但有时你需要从一个C文件当中使用mock。比如，当一些桩文件是在一些C源文件当中实现的时候，去将它们用C++重写一遍显然费力不讨好，这个时候如果可以在C文件当中直接调用mock框架显然容易许多，而C接口便是为此而生。这些接口基于C++已有的接口写成，所以你可以很明显的知道下面这些代码的作用：
+
+```
+#include "CppUTestExt/MockSupport_c.h"
+
+mock_c()->expectOneCall("foo")->withIntParameters("integer", 10)->andReturnDoubleValue(1.11);
+mock_c()->actualCall("foo")->withIntParameters("integer", 10)->returnValue().value.doubleValue;
+
+mock_c()->installComparator("type", equalMethod, toStringMethod);
+mock_scope_c("scope")->expectOneCall("bar")->withParameterOfType("type", "name", object);
+mock_scope_c("scope")->actualCall("bar")->withParameterOfType("type", "name", object);
+mock_c()->removeAllComparators();
+
+mock_c()->setIntData("important", 10);
+
+mock_c()->checkExpectations();
+mock_c()->clear();
+```
+
+C接口使用与C++接口类似的编译结构，尽管比较起来在通用性上面略微逊色，但完全具有应该有的功能。
+
 
 
 
